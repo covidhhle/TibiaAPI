@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.IO.Compression;
 using System.Net;
 using System.Net.Http;
@@ -623,15 +624,20 @@ namespace OXGaming.TibiaAPI.Network
                 }
 
                 var worldName = Encoding.UTF8.GetString(_clientInMessage.GetBuffer(), 0, count - 1);
+                _client.Logger.Info($"[Login] World name received: '{worldName}'");
                 foreach (var world in _loginData.playdata.worlds) {
                     var name = (string)world.name;
                     if (name.Equals(worldName, StringComparison.CurrentCultureIgnoreCase)) {
-                        _clientSocket.BeginReceive(_clientInMessage.GetBuffer(), 0, 2, SocketFlags.None, new AsyncCallback(BeginReceiveClientCallback), 0);
+                        var serverAddress = (string)world.externaladdressprotected;
+                        var serverPort = (int)world.externalportprotected;
+                        _client.Logger.Info($"[Login] Connecting to game server: {serverAddress}:{serverPort}");
+                        _clientSocket.BeginReceive(_clientInMessage.GetBuffer(), 0, 6, SocketFlags.None, new AsyncCallback(BeginReceiveClientCallback), 0);
 
                         _serverSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-                        _serverSocket.Connect((string)world.externaladdressprotected, (int)world.externalportprotected);
+                        _serverSocket.Connect(serverAddress, serverPort);
+                        _client.Logger.Info($"[Login] Connected to game server, forwarding world name and awaiting login packet.");
                         _serverSocket.Send(_clientInMessage.GetBuffer(), 0, count, SocketFlags.None);
-                        _serverSocket.BeginReceive(_serverInMessage.GetBuffer(), 0, 2, SocketFlags.None, new AsyncCallback(BeginReceiveServerCallback), 0);
+                        _serverSocket.BeginReceive(_serverInMessage.GetBuffer(), 0, 6, SocketFlags.None, new AsyncCallback(BeginReceiveServerCallback), 0);
                         return;
                     }
                 }
@@ -664,7 +670,7 @@ namespace OXGaming.TibiaAPI.Network
                     return;
                 }
 
-                _clientInMessage.Size = (uint)BitConverter.ToUInt16(_clientInMessage.GetBuffer(), 0) + 2;
+                _clientInMessage.Size = (uint)(BitConverter.ToUInt16(_clientInMessage.GetBuffer(), 0) * 8 + 6);
                 while (count < _clientInMessage.Size) {
                     var read = _clientSocket.Receive(_clientInMessage.GetBuffer(), count, (int)(_clientInMessage.Size - count), SocketFlags.None);
                     if (read <= 0)
@@ -675,11 +681,21 @@ namespace OXGaming.TibiaAPI.Network
 
                 var protocol = (int)ar.AsyncState;
                 if (protocol == 0) {
-                    var rsaStartIndex = 31;
+                    _client.Logger.Info($"[Login] Received login packet from client ({_clientInMessage.Size} bytes). Raw: {BitConverter.ToString(_clientInMessage.GetData()).Replace('-', ' ')}");
+
+                    _clientInMessage.Seek(16, SeekOrigin.Begin); // Skip to the string values
+                    var clientVersion = _clientInMessage.ReadString(); // Client version
+                    var assetsHash = _clientInMessage.ReadString(); // Assets.json SHA256 hash
+                    _clientInMessage.Seek(1, SeekOrigin.Current); // Skip ClientPreviewState value
+                    var rsaStartIndex = (int)_clientInMessage.Position;
+
+                    _client.Logger.Info($"[Login] Client version='{clientVersion}', assetsHash='{assetsHash}', rsaStartIndex={rsaStartIndex}");
 
                     _rsa.OpenTibiaDecrypt(_clientInMessage, rsaStartIndex);
                     _clientInMessage.Seek(rsaStartIndex, SeekOrigin.Begin);
-                    if (_clientInMessage.ReadByte() != 0)
+                    var rsaMarker = _clientInMessage.ReadByte();
+                    _client.Logger.Info($"[Login] RSA marker byte = 0x{rsaMarker:X2} (expected 0x00)");
+                    if (rsaMarker != 0)
                         throw new Exception("[Connection.BeginReceiveClientCallback] RSA decryption failed.");
 
                     OnReceivedClientMessage?.Invoke(_clientInMessage.GetData());
@@ -693,6 +709,8 @@ namespace OXGaming.TibiaAPI.Network
                             _xteaKey[i] = _clientInMessage.ReadUInt32();
                     }
 
+                    _client.Logger.Info($"[Login] XTEA key: [{string.Join(", ", _xteaKey.Select(k => $"0x{k:X8}"))}]");
+
                     // If the user supplied a login web service address,
                     // it's safe to assume it's an Open-Tibia server.
                     if (string.IsNullOrEmpty(_loginWebService))
@@ -700,6 +718,7 @@ namespace OXGaming.TibiaAPI.Network
                     else
                         _rsa.OpenTibiaEncrypt(_clientInMessage, rsaStartIndex);
 
+                    _client.Logger.Info($"[Login] Forwarding login packet to server ({_clientInMessage.Size} bytes).");
                     SendToServer(_clientInMessage.GetData());
                 } else {
                     if (IsClientPacketDecryptionEnabled) {
@@ -727,7 +746,7 @@ namespace OXGaming.TibiaAPI.Network
                     }
                 }
 
-                _clientSocket.BeginReceive(_clientInMessage.GetBuffer(), 0, 2, SocketFlags.None, new AsyncCallback(BeginReceiveClientCallback), 1);
+                _clientSocket.BeginReceive(_clientInMessage.GetBuffer(), 0, 6, SocketFlags.None, new AsyncCallback(BeginReceiveClientCallback), 1);
             } catch (ObjectDisposedException) {
                 // This exception can occur when the player logs out of their character (e.g., Ctrl+L).
                 ResetConnection();
@@ -758,7 +777,8 @@ namespace OXGaming.TibiaAPI.Network
                     return;
                 }
 
-                _serverInMessage.Size = (uint)BitConverter.ToUInt16(_serverInMessage.GetBuffer(), 0) + 2;
+                var chunkCount = BitConverter.ToUInt16(_serverInMessage.GetBuffer(), 0);
+                _serverInMessage.Size = (uint)(chunkCount * 8 + 6);
                 while (count < _serverInMessage.Size) {
                     var read = _serverSocket.Receive(_serverInMessage.GetBuffer(), count, (int)(_serverInMessage.Size - count), SocketFlags.None);
                     if (read <= 0)
@@ -770,6 +790,28 @@ namespace OXGaming.TibiaAPI.Network
                 if (IsServerPacketDecryptionEnabled) {
                     _serverInMessage.PrepareToParse(_xteaKey, _zStream);
                     OnReceivedServerMessage?.Invoke(_serverInMessage.GetData());
+
+                    var buf = _serverInMessage.GetBuffer();
+                    if (_serverInMessage.Size > 8 && buf[7] == (byte)ServerPacketType.ImpactTracking) {
+                        var impactType = buf[8];
+                        if (impactType == (byte)ImpactAnalyzer.Heal) {
+                            var amount = BitConverter.ToUInt32(buf, 9);
+                            _client.Logger.Info($"[ImpactTracking] Heal: {amount} HP");
+                        } else if (impactType == (byte)ImpactAnalyzer.DamageDealt) {
+                            var amount = BitConverter.ToUInt32(buf, 9);
+                            var element = (ElementType)buf[13];
+                            _client.Logger.Info($"[ImpactTracking] DamageDealt: {amount} ({element})");
+                        } else if (impactType == (byte)ImpactAnalyzer.DamageReceived) {
+                            var amount = BitConverter.ToUInt32(buf, 9);
+                            var element = (ElementType)buf[13];
+                            var targetLen = BitConverter.ToUInt16(buf, 14);
+                            var target = System.Text.Encoding.UTF8.GetString(buf, 16, targetLen);
+                            _client.Logger.Info($"[ImpactTracking] DamageReceived: {amount} ({element}) from {target}");
+                        } else {
+                            var rawBytes = BitConverter.ToString(_serverInMessage.GetData()).Replace('-', ' ');
+                            _client.Logger.Info($"[ImpactTracking] Unknown type={impactType}. Raw: {rawBytes}");
+                        }
+                    }
                 }
 
                 if (IsServerPacketParsingEnabled) {
@@ -792,7 +834,7 @@ namespace OXGaming.TibiaAPI.Network
                     SendToClient(_serverInMessage.GetData());
                 }
 
-                _serverSocket.BeginReceive(_serverInMessage.GetBuffer(), 0, 2, SocketFlags.None, new AsyncCallback(BeginReceiveServerCallback), 1);
+                _serverSocket.BeginReceive(_serverInMessage.GetBuffer(), 0, 6, SocketFlags.None, new AsyncCallback(BeginReceiveServerCallback), 1);
             } catch (ObjectDisposedException) {
                 // This exception can occur if Stop() is called.
             } catch (SocketException) {

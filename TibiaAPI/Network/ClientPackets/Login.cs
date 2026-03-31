@@ -18,7 +18,7 @@ namespace OXGaming.TibiaAPI.Network.ClientPackets
         public uint ClientVersion { get; set; }
 
         public ushort ClientType { get; set; }
-        public ushort DatRevision { get; set; }
+        public string AssetsHash { get; set; }
         public ushort ProtocolVersion { get; set; }
 
         public byte ChallengeRandom { get; set; }
@@ -39,7 +39,7 @@ namespace OXGaming.TibiaAPI.Network.ClientPackets
             ClientVersion = message.ReadUInt32();
 			Version = message.ReadString();
 
-            DatRevision = message.ReadUInt16();
+            AssetsHash = message.ReadString();
             ClientPreviewState = message.ReadByte();
 
             if (message.ReadByte() != 0)
@@ -69,7 +69,7 @@ namespace OXGaming.TibiaAPI.Network.ClientPackets
             message.Write(ClientVersion);
 			message.Write(Version);
 
-            message.Write(DatRevision);
+            message.Write(AssetsHash);
             message.Write(ClientPreviewState);
             message.Write((byte)0); // Start RSA block.
 

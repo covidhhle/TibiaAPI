@@ -23,7 +23,7 @@ namespace OXGaming.TibiaAPI.Network
     /// </remarks>
     public class NetworkMessage
     {
-        private const uint PayloadDataPosition = 8;
+        private const uint PayloadDataPosition = 7;
 
         private const int GroundLayer = 7;
         private const int UndergroundLayer = 2;
@@ -128,7 +128,7 @@ namespace OXGaming.TibiaAPI.Network
             Position = 0;
             Write(ushort.MinValue);
             Write(~CompressedFlag);
-            Write(ushort.MinValue);
+            Write((byte)0);
             Size = PayloadDataPosition;
         }
 
@@ -1373,12 +1373,14 @@ namespace OXGaming.TibiaAPI.Network
             if (xteaKey != null)
                 Xtea.Decrypt(_buffer, Size, xteaKey);
 
+            var paddingCount = _buffer[6];
+
             if (IsCompressed && zStream != null) {
-                var compressedSize = BitConverter.ToUInt16(_buffer, 6);
+                var compressedSize = (int)(Size - 7 - paddingCount);
                 var inBuffer = new byte[compressedSize];
                 var outBuffer = new byte[MaxMessageSize];
 
-                Array.Copy(_buffer, 8, inBuffer, 0, compressedSize);
+                Array.Copy(_buffer, 7, inBuffer, 0, compressedSize);
 
                 zStream.next_in = inBuffer;
                 zStream.next_in_index = 0;
@@ -1394,23 +1396,25 @@ namespace OXGaming.TibiaAPI.Network
                 Position = 2;
                 _wasCompressed = true;
                 Write(SequenceNumber ^ CompressedFlag);
-                Write((ushort)zStream.next_out_index);
+                Write((byte)0);
                 Write(outBuffer, 0, (uint)zStream.next_out_index);
+                Size = Position;
+                paddingCount = 0;
             }
 
-            Position = 6;
-            Size = ReadUInt16() + PayloadDataPosition;
+            Position = PayloadDataPosition;
+            Size = Size - paddingCount;
         }
 
         public void PrepareToSend(uint[] xteaKey, ZStream zStream = null)
         {
             if (_wasCompressed && zStream != null)
             {
-                var uncompressedSize = _size - 8;
+                var uncompressedSize = _size - 7;
                 var inBuffer = new byte[uncompressedSize];
                 var outBuffer = new byte[MaxMessageSize];
 
-                Array.Copy(_buffer, 8, inBuffer, 0, uncompressedSize);
+                Array.Copy(_buffer, 7, inBuffer, 0, uncompressedSize);
 
                 zStream.next_in = inBuffer;
                 zStream.next_in_index = 0;
@@ -1430,8 +1434,8 @@ namespace OXGaming.TibiaAPI.Network
                 var data = new byte[zStream.next_out_index - 4];
                 Array.Copy(outBuffer, data, data.Length);
 
-                Position = 8;
-                Size = 8;
+                Position = 7;
+                Size = 7;
                 Write(outBuffer, 0, (uint)(zStream.next_out_index - 4));
 
                 if (!IsCompressed)
@@ -1441,16 +1445,21 @@ namespace OXGaming.TibiaAPI.Network
                 }
             }
 
+            var paddingCount = (byte)((8 - ((Size - 6) % 8)) % 8);
             Position = 6;
-            Write((ushort)(Size - PayloadDataPosition));
+            Write(paddingCount);
 
             if (xteaKey != null)
             {
                 Xtea.Encrypt(_buffer, ref _size, xteaKey);
             }
+            else
+            {
+                _size += paddingCount;
+            }
 
             Position = 0;
-            Write((ushort)(_size - 2));
+            Write((ushort)((_size - 6) / 8));
         }
     }
 }
