@@ -235,16 +235,20 @@ namespace Record
             ScanPackets(data);
         }
 
-        private static readonly HashSet<MessageModeType> _relevantMessageModes = new HashSet<MessageModeType>
+        private static readonly HashSet<MessageModeType> _serverLogModes = new HashSet<MessageModeType>
         {
             MessageModeType.DamageDealed,
             MessageModeType.DamageReceived,
             MessageModeType.Heal,
-            MessageModeType.Mana,
             MessageModeType.Exp,
+            MessageModeType.DamageOthers,
             MessageModeType.HealOthers,
-            MessageModeType.Loot,
+            MessageModeType.ExpOthers,
             MessageModeType.Status,
+            MessageModeType.Loot,
+            MessageModeType.HotkeyUse,
+            MessageModeType.Mana,
+            MessageModeType.Potion,
         };
 
         private static void ScanPackets(byte[] data)
@@ -272,7 +276,7 @@ namespace Record
                         if ((ServerPacketType)opcode == ServerPacketType.Message)
                         {
                             var p = (OXGaming.TibiaAPI.Network.ServerPackets.Message)packet;
-                            if (_relevantMessageModes.Contains(p.MessageMode))
+                            if (_serverLogModes.Contains(p.MessageMode))
                                 _impactWriter?.WriteLine($"{ms},\"{p.Text.Replace("\"", "\"\"")}\"");
                         }
                     }
