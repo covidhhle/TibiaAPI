@@ -790,28 +790,6 @@ namespace OXGaming.TibiaAPI.Network
                 if (IsServerPacketDecryptionEnabled) {
                     _serverInMessage.PrepareToParse(_xteaKey, _zStream);
                     OnReceivedServerMessage?.Invoke(_serverInMessage.GetData());
-
-                    var buf = _serverInMessage.GetBuffer();
-                    if (_serverInMessage.Size > 8 && buf[7] == (byte)ServerPacketType.ImpactTracking) {
-                        var impactType = buf[8];
-                        if (impactType == (byte)ImpactAnalyzer.Heal) {
-                            var amount = BitConverter.ToUInt32(buf, 9);
-                            _client.Logger.Info($"[ImpactTracking] Heal: {amount} HP");
-                        } else if (impactType == (byte)ImpactAnalyzer.DamageDealt) {
-                            var amount = BitConverter.ToUInt32(buf, 9);
-                            var element = (ElementType)buf[13];
-                            _client.Logger.Info($"[ImpactTracking] DamageDealt: {amount} ({element})");
-                        } else if (impactType == (byte)ImpactAnalyzer.DamageReceived) {
-                            var amount = BitConverter.ToUInt32(buf, 9);
-                            var element = (ElementType)buf[13];
-                            var targetLen = BitConverter.ToUInt16(buf, 14);
-                            var target = System.Text.Encoding.UTF8.GetString(buf, 16, targetLen);
-                            _client.Logger.Info($"[ImpactTracking] DamageReceived: {amount} ({element}) from {target}");
-                        } else {
-                            var rawBytes = BitConverter.ToString(_serverInMessage.GetData()).Replace('-', ' ');
-                            _client.Logger.Info($"[ImpactTracking] Unknown type={impactType}. Raw: {rawBytes}");
-                        }
-                    }
                 }
 
                 if (IsServerPacketParsingEnabled) {

@@ -6,6 +6,8 @@ using System.Threading;
 
 using OXGaming.TibiaAPI;
 using OXGaming.TibiaAPI.Constants;
+using OXGaming.TibiaAPI.Network;
+using OXGaming.TibiaAPI.Network.ServerPackets;
 using OXGaming.TibiaAPI.Utilities;
 
 namespace Record
@@ -30,6 +32,8 @@ namespace Record
         static Client _client;
 
         static FileStream _fileStream;
+
+        static StreamWriter _impactWriter;
 
         static Thread _fileWriteThread;
 
@@ -119,6 +123,10 @@ namespace Record
                     _fileStream = new FileStream(Path.Combine(recordingDirectory, filename), FileMode.Append);
                     _binaryWriter = new BinaryWriter(_fileStream);
 
+                    var impactLogPath = Path.Combine(recordingDirectory, Path.ChangeExtension(filename, ".impact.csv"));
+                    _impactWriter = new StreamWriter(impactLogPath, append: false) { AutoFlush = true };
+                    _impactWriter.WriteLine("timestamp_ms,event_type,amount,element,source,target");
+
                     _binaryWriter.Write(_client.Version);
 
                     _client.Logger.Level = _logLevel;
@@ -127,7 +135,6 @@ namespace Record
                     _client.Connection.OnReceivedClientMessage += Proxy_OnReceivedClientMessage;
                     _client.Connection.OnReceivedServerMessage += Proxy_OnReceivedServerMessage;
 
-                    // Disable packet parsing as we only care about the raw, decrypted packets, and speed.
                     _client.Connection.IsClientPacketParsingEnabled = false;
                     _client.Connection.IsServerPacketParsingEnabled = false;
                     _client.StartConnection(httpPort: _httpPort, loginWebService: _loginWebService);
@@ -178,6 +185,11 @@ namespace Record
                 _fileStream.Close();
             }
 
+            if (_impactWriter != null)
+            {
+                _impactWriter.Close();
+            }
+
             if (_stopWatch.IsRunning)
             {
                 _stopWatch.Stop();
@@ -192,6 +204,58 @@ namespace Record
         private static void Proxy_OnReceivedServerMessage(byte[] data)
         {
             QueueMessage(PacketType.Server, data);
+            ScanImpactTracking(data);
+        }
+
+        private static void ScanImpactTracking(byte[] data)
+        {
+            const uint payloadStart = 7;
+            if (data.Length <= payloadStart)
+                return;
+
+            try
+            {
+                var message = new NetworkMessage(_client);
+                message.Write(data, payloadStart, (uint)(data.Length - payloadStart));
+                message.SetPosition(payloadStart);
+
+                while (message.Position < message.Size)
+                {
+                    var opcode = message.ReadByte();
+                    var packet = ServerPacket.CreateInstance(_client, (ServerPacketType)opcode);
+                    packet.ParseFromNetworkMessage(message);
+
+                    if ((ServerPacketType)opcode == ServerPacketType.ImpactTracking)
+                    {
+                        var p = (ImpactTracking)packet;
+                        var ms = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                        string logLine;
+                        string csvRow;
+
+                        if (p.Type == (byte)ImpactAnalyzer.Heal)
+                        {
+                            logLine = $"[ImpactTracking] Heal: {p.Amount} HP";
+                            csvRow = $"{ms},healing_received,{p.Amount},,,";
+                        }
+                        else if (p.Type == (byte)ImpactAnalyzer.DamageDealt)
+                        {
+                            logLine = $"[ImpactTracking] DamageDealt: {p.Amount} ({p.Element})";
+                            csvRow = $"{ms},damage_dealt,{p.Amount},{p.Element},,";
+                        }
+                        else if (p.Type == (byte)ImpactAnalyzer.DamageReceived)
+                        {
+                            logLine = $"[ImpactTracking] DamageReceived: {p.Amount} ({p.Element}) from {p.Target}";
+                            csvRow = $"{ms},damage_taken,{p.Amount},{p.Element},{p.Target},";
+                        }
+                        else
+                            continue;
+
+                        _client.Logger.Info(logLine);
+                        _impactWriter?.WriteLine(csvRow);
+                    }
+                }
+            }
+            catch { }
         }
 
         private static void QueueMessage(PacketType packetType, byte[] data)
