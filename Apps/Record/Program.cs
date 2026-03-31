@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Threading;
@@ -47,6 +48,7 @@ namespace Record
         static string _loginWebService = string.Empty;
         static string _tibiaDirectory = string.Empty;
         static string _impactCsvPath = string.Empty;
+        static string _csvSource = "impact";
 
         static int _httpPort = 7171;
 
@@ -96,6 +98,12 @@ namespace Record
                             _impactCsvPath = splitArg[1].Replace("\"", "");
                         }
                         break;
+                    case "-s":
+                    case "--source":
+                        {
+                            _csvSource = splitArg[1].ToLower();
+                        }
+                        break;
                     case "--loglevel":
                         {
                             _logLevel = Logger.ConvertToLogLevel(splitArg[1]);
@@ -141,7 +149,9 @@ namespace Record
                         Path.GetDirectoryName(_impactCsvFinalPath),
                         Path.GetFileNameWithoutExtension(_impactCsvFinalPath) + ".current.csv");
                     _impactWriter = new StreamWriter(_impactCsvActivePath, append: false) { AutoFlush = true };
-                    _impactWriter.WriteLine("timestamp_ms,event_type,amount,element,source,target");
+                    _impactWriter.WriteLine(_csvSource == "message"
+                        ? "timestamp_ms,raw_text"
+                        : "timestamp_ms,event_type,amount,element,source,target");
 
                     _binaryWriter.Write(_client.Version);
 
@@ -222,10 +232,22 @@ namespace Record
         private static void Proxy_OnReceivedServerMessage(byte[] data)
         {
             QueueMessage(PacketType.Server, data);
-            ScanImpactTracking(data);
+            ScanPackets(data);
         }
 
-        private static void ScanImpactTracking(byte[] data)
+        private static readonly HashSet<MessageModeType> _relevantMessageModes = new HashSet<MessageModeType>
+        {
+            MessageModeType.DamageDealed,
+            MessageModeType.DamageReceived,
+            MessageModeType.Heal,
+            MessageModeType.Mana,
+            MessageModeType.Exp,
+            MessageModeType.HealOthers,
+            MessageModeType.Loot,
+            MessageModeType.Status,
+        };
+
+        private static void ScanPackets(byte[] data)
         {
             const uint payloadStart = 7;
             if (data.Length <= payloadStart)
@@ -243,22 +265,35 @@ namespace Record
                     var packet = ServerPacket.CreateInstance(_client, (ServerPacketType)opcode);
                     packet.ParseFromNetworkMessage(message);
 
-                    if ((ServerPacketType)opcode == ServerPacketType.ImpactTracking)
+                    var ms = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
+                    if (_csvSource == "message")
                     {
-                        var p = (ImpactTracking)packet;
-                        var ms = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-                        string csvRow;
+                        if ((ServerPacketType)opcode == ServerPacketType.Message)
+                        {
+                            var p = (OXGaming.TibiaAPI.Network.ServerPackets.Message)packet;
+                            if (_relevantMessageModes.Contains(p.MessageMode))
+                                _impactWriter?.WriteLine($"{ms},\"{p.Text.Replace("\"", "\"\"")}\"");
+                        }
+                    }
+                    else
+                    {
+                        if ((ServerPacketType)opcode == ServerPacketType.ImpactTracking)
+                        {
+                            var p = (ImpactTracking)packet;
+                            string csvRow;
 
-                        if (p.Type == (byte)ImpactAnalyzer.Heal)
-                            csvRow = $"{ms},healing_received,{p.Amount},,,";
-                        else if (p.Type == (byte)ImpactAnalyzer.DamageDealt)
-                            csvRow = $"{ms},damage_dealt,{p.Amount},{p.Element},,";
-                        else if (p.Type == (byte)ImpactAnalyzer.DamageReceived)
-                            csvRow = $"{ms},damage_taken,{p.Amount},{p.Element},{p.Target},";
-                        else
-                            continue;
+                            if (p.Type == (byte)ImpactAnalyzer.Heal)
+                                csvRow = $"{ms},healing_received,{p.Amount},,,";
+                            else if (p.Type == (byte)ImpactAnalyzer.DamageDealt)
+                                csvRow = $"{ms},damage_dealt,{p.Amount},{p.Element},,";
+                            else if (p.Type == (byte)ImpactAnalyzer.DamageReceived)
+                                csvRow = $"{ms},damage_taken,{p.Amount},{p.Element},{p.Target},";
+                            else
+                                continue;
 
-                        _impactWriter?.WriteLine(csvRow);
+                            _impactWriter?.WriteLine(csvRow);
+                        }
                     }
                 }
             }

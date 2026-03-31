@@ -46,12 +46,45 @@ By default, the `Record` app will attempt to login to CipSoft's official loginWe
 You can override this for use with Open-Tibia servers back passing `-l/--login`.
 For example, `--login=https://my-ot-server.com/login.php`.
 
-By default, the `Record` app will attempt to locate your Tibia package directory based on the default installation location for your operating system. 
-This is needed to get the client version and load the .dat file. 
-You can override this by passing `-t/--tibiadirectory`. 
-For example. `-t=C:\Tibia\packages\Tibia\`. 
-Note that if you override this directory you need to target the package directory, not the main directory. 
+By default, the `Record` app will attempt to locate your Tibia package directory based on the default installation location for your operating system.
+This is needed to get the client version and load the .dat file.
+You can override this by passing `-t/--tibiadirectory`.
+For example. `-t=C:\Tibia\packages\Tibia\`.
+Note that if you override this directory you need to target the package directory, not the main directory.
 The package directory includes the `package.json` file and `assets` directory.
+
+#### Impact CSV
+
+In addition to the `.oxr` recording, `Record` can write a real-time CSV of combat events parsed directly from the network packets — no OCR required.
+
+Pass `-i/--impactcsv` with a folder path to enable this. The filename is auto-generated from the session start time (UTC) and placed in that folder.
+For example, `-i=C:\Logs\`.
+
+While the session is active the file is named `*.impact.current.csv`. On shutdown it is renamed to `*.impact.csv`, so consumers can distinguish live from completed sessions.
+
+Use `-s/--source` to control which packets are written to the CSV:
+
+- `impact` *(default)* — Writes one row per `ImpactTracking` packet. Provides exact damage/heal values and element type directly from the protocol. Columns: `timestamp_ms, event_type, amount, element, source, target`.
+
+  ```csv
+  timestamp_ms,event_type,amount,element,source,target
+  1743426125000,healing_received,150,,,
+  1743426125312,damage_dealt,312,Fire,,
+  1743426125841,damage_taken,85,Physical,Demon,
+  ```
+
+  `event_type` values match the `CombatEvent.event_type` field used by [tibia_parser](https://github.com/covidhhle/tibia_parser). Note that `damage_dealt` rows have no `target` — the `ImpactTracking` packet does not include the creature name. See `docs/record-damage-dealt-target.md`.
+
+- `message` — Writes one row per relevant server log `Message` packet (`DamageDealed`, `DamageReceived`, `Heal`, `Mana`, `Exp`, `HealOthers`, `Loot`, `Status`). The `raw_text` column contains the exact log line the Tibia client would display, making this source 1:1 compatible with tibia_parser's existing log parser. Columns: `timestamp_ms, raw_text`.
+
+  ```csv
+  timestamp_ms,raw_text
+  1743426125000,"A grim reaper loses 945 hitpoints due to your critical attack."
+  1743426125312,"You lose 288 hitpoints due to an attack by a flimsy lost soul."
+  1743426125841,"You were healed for 162 hitpoints."
+  ```
+
+`timestamp_ms` is Unix milliseconds UTC in both modes. In pandas: `pd.to_datetime(df['timestamp_ms'], unit='ms', utc=True)`.
 
 Open-Tibia Public RSA Key:
 ```
