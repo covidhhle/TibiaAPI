@@ -1,9 +1,12 @@
 ![.NET Core](https://github.com/jo3bingham/TibiaAPI/workflows/.NET%20Core/badge.svg)
 
-# Disclaimer:
+# Disclaimer (marcosvf132):
 The original version of this API included support for all protocols, but on my fork this support was removed. This version was updated to work on protocol v13.02 or higher, using it on older protocols may not work as intended and may not be useful for you.
 
 This TibiaAPI version is still a work in progress and may have bugs.
+
+# Disclaimer (covidhhle):
+I have no idea what I'm doing, I just asked Claude to fix the proxy for 15.24 based on information from forum posts. Packet structure could be completely wrong for all I know, but at least it doesn't seem to crash.
 
 # TibiaAPI
 TibiaAPI is an open-source, cross-platform proxy written in C#. You will need to install .NET Core 3.1 to take full advantage of the code in this repository.
