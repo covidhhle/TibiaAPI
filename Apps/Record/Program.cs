@@ -35,6 +35,9 @@ namespace Record
 
         static StreamWriter _impactWriter;
 
+        static string _impactCsvActivePath = string.Empty;
+        static string _impactCsvFinalPath = string.Empty;
+
         static Thread _fileWriteThread;
 
         private static Logger.LogLevel _logLevel = Logger.LogLevel.Error;
@@ -43,6 +46,7 @@ namespace Record
 
         static string _loginWebService = string.Empty;
         static string _tibiaDirectory = string.Empty;
+        static string _impactCsvPath = string.Empty;
 
         static int _httpPort = 7171;
 
@@ -86,6 +90,12 @@ namespace Record
                             _loginWebService = splitArg[1];
                         }
                         break;
+                    case "-i":
+                    case "--impactcsv":
+                        {
+                            _impactCsvPath = splitArg[1].Replace("\"", "");
+                        }
+                        break;
                     case "--loglevel":
                         {
                             _logLevel = Logger.ConvertToLogLevel(splitArg[1]);
@@ -123,8 +133,14 @@ namespace Record
                     _fileStream = new FileStream(Path.Combine(recordingDirectory, filename), FileMode.Append);
                     _binaryWriter = new BinaryWriter(_fileStream);
 
-                    var impactLogPath = Path.Combine(recordingDirectory, Path.ChangeExtension(filename, ".impact.csv"));
-                    _impactWriter = new StreamWriter(impactLogPath, append: false) { AutoFlush = true };
+                    var impactDirectory = string.IsNullOrEmpty(_impactCsvPath) ? recordingDirectory : _impactCsvPath;
+                    if (!Directory.Exists(impactDirectory))
+                        Directory.CreateDirectory(impactDirectory);
+                    _impactCsvFinalPath = Path.Combine(impactDirectory, Path.ChangeExtension(filename, ".impact.csv"));
+                    _impactCsvActivePath = Path.Combine(
+                        Path.GetDirectoryName(_impactCsvFinalPath),
+                        Path.GetFileNameWithoutExtension(_impactCsvFinalPath) + ".current.csv");
+                    _impactWriter = new StreamWriter(_impactCsvActivePath, append: false) { AutoFlush = true };
                     _impactWriter.WriteLine("timestamp_ms,event_type,amount,element,source,target");
 
                     _binaryWriter.Write(_client.Version);
@@ -188,6 +204,8 @@ namespace Record
             if (_impactWriter != null)
             {
                 _impactWriter.Close();
+                if (!string.IsNullOrEmpty(_impactCsvActivePath) && File.Exists(_impactCsvActivePath))
+                    File.Move(_impactCsvActivePath, _impactCsvFinalPath, overwrite: true);
             }
 
             if (_stopWatch.IsRunning)
