@@ -158,4 +158,4 @@ Ethereum: 0xaD4d3650A89a2786B60F86c2980d772aa412741F
 
 XRP: Address: rw2ciyaNshpHe7bCHo4bRWq6pqqynnWKQg | Tag: 1431977163
 
-If you want to chat you can find me on Discord: `marcosvf132`
+If you want to chat you can find me on Discord: `kinesthetic`
