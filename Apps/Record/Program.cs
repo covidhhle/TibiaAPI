@@ -247,28 +247,17 @@ namespace Record
                     {
                         var p = (ImpactTracking)packet;
                         var ms = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-                        string logLine;
                         string csvRow;
 
                         if (p.Type == (byte)ImpactAnalyzer.Heal)
-                        {
-                            logLine = $"[ImpactTracking] Heal: {p.Amount} HP";
                             csvRow = $"{ms},healing_received,{p.Amount},,,";
-                        }
                         else if (p.Type == (byte)ImpactAnalyzer.DamageDealt)
-                        {
-                            logLine = $"[ImpactTracking] DamageDealt: {p.Amount} ({p.Element})";
                             csvRow = $"{ms},damage_dealt,{p.Amount},{p.Element},,";
-                        }
                         else if (p.Type == (byte)ImpactAnalyzer.DamageReceived)
-                        {
-                            logLine = $"[ImpactTracking] DamageReceived: {p.Amount} ({p.Element}) from {p.Target}";
                             csvRow = $"{ms},damage_taken,{p.Amount},{p.Element},{p.Target},";
-                        }
                         else
                             continue;
 
-                        _client.Logger.Info(logLine);
                         _impactWriter?.WriteLine(csvRow);
                     }
                 }
