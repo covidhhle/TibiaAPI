@@ -267,7 +267,10 @@ namespace Record
                 {
                     var opcode = message.ReadByte();
                     var packet = ServerPacket.CreateInstance(_client, (ServerPacketType)opcode);
-                    packet.ParseFromNetworkMessage(message);
+                    var savedLevel = _client.Logger.Level;
+                    _client.Logger.Level = Logger.LogLevel.Disabled;
+                    try { packet.ParseFromNetworkMessage(message); }
+                    finally { _client.Logger.Level = savedLevel; }
 
                     var ms = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
